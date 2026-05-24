@@ -5,6 +5,11 @@ import { Menu, X, BookOpen, Briefcase, FileText, LayoutDashboard, Bell, User, Gr
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 
+import { useState } from "react"
+import { Menu, X, BookOpen, Briefcase, FileText, LayoutDashboard, Bell, User, GraduationCap } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
+
 const AdminNavigation = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
