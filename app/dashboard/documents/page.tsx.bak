@@ -1,0 +1,349 @@
+"use client"
+
+import type React from "react"
+import { useState, useEffect } from "react"
+import { Upload, FileText, Eye, Trash2 } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import Navigation from "@/components/Navigation"
+import { useToast } from "@/hooks/use-toast"
+
+interface Document {
+  id: number
+  name: string
+  type: string
+  status: string
+  required: boolean
+  fileName?: string
+  uploadedDate?: string
+  fileUrl?: string
+  fileType?: string
+  dataUrl?: string
+}
+
+const Documents = () => {
+  const { toast } = useToast()
+  const [viewDocument, setViewDocument] = useState<null | { name: string; url?: string; type?: string }>(null)
+  const [documents, setDocuments] = useState<Document[]>([])
+  const [hasSubmittedApplications, setHasSubmittedApplications] = useState(false)
+  const [uploadedCount, setUploadedCount] = useState(0)
+
+  const defaults: Document[] = [
+    { id: 1, name: "Certified ID Copy", type: "id", status: "not_uploaded", required: true },
+    { id: 2, name: "Proof of Registration", type: "registration", status: "not_uploaded", required: true },
+    { id: 3, name: "Academic Transcripts", type: "transcripts", status: "not_uploaded", required: true },
+    { id: 4, name: "Motivation Letter", type: "motivation", status: "not_uploaded", required: true },
+    { id: 5, name: "Proof of Residence", type: "residence", status: "not_uploaded", required: true },
+  ]
+
+  // Load documents and check for submitted applications
+  useEffect(() => {
+    try {
+      // Check if user has any submitted applications
+      const applications = JSON.parse(localStorage.getItem('applications') || '[]')
+      const hasSubmitted = applications.length > 0
+      setHasSubmittedApplications(hasSubmitted)
+
+      // Only load documents if there are submitted applications
+      if (hasSubmitted) {
+        const saved = localStorage.getItem("documents")
+        if (saved) {
+          const parsed = JSON.parse(saved)
+          if (Array.isArray(parsed)) {
+            // Remove duplicates based on name
+            const uniqueDocs = parsed.filter((doc, index, self) =>
+              index === self.findIndex((d) => d.name === doc.name)
+            )
+            setDocuments(uniqueDocs)
+            setUploadedCount(uniqueDocs.filter(d => d.status !== "not_uploaded").length)
+            return
+          }
+        }
+      }
+      // Set defaults only if no documents exist and there are submitted applications
+      if (hasSubmitted && !localStorage.getItem("documents")) {
+        localStorage.setItem("documents", JSON.stringify(defaults))
+        setDocuments(defaults)
+      } else {
+        setDocuments([])
+      }
+      setUploadedCount(0)
+    } catch (e) {
+      console.error('Error loading documents:', e)
+      setDocuments([])
+      setUploadedCount(0)
+    }
+  }, [])
+
+  const handleFileUpload = async (documentId: number, event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const fileUrl = URL.createObjectURL(file)
+    const uploadedDate = new Date().toISOString().split("T")[0]
+
+    try {
+      // Read file as data URL for persistence
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      const updated = documents.map((doc) =>
+        doc.id === documentId
+          ? { ...doc, status: "pending", fileName: file.name, uploadedDate, fileUrl, fileType: file.type, dataUrl }
+          : doc
+      )
+
+      setDocuments(updated)
+      localStorage.setItem("documents", JSON.stringify(
+        updated.map(({ fileUrl: _, ...rest }) => rest)
+      ))
+      setUploadedCount(updated.filter(d => d.status !== "not_uploaded").length)
+
+      // Reset file input
+      event.target.value = ''
+
+      toast({
+        title: "Document uploaded",
+        description: `${file.name} has been uploaded successfully`,
+      })
+
+      // Notify other listeners
+      window.dispatchEvent(new CustomEvent("localStorageUpdated", { detail: { key: "documents" } }))
+
+    } catch (e) {
+      console.error('Error uploading document:', e)
+      URL.revokeObjectURL(fileUrl)
+      toast({
+        title: "Error",
+        description: "Failed to upload document. Please try again.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleViewDocument = (doc: Document) => {
+    if (doc.dataUrl) {
+      setViewDocument({
+        name: doc.fileName || doc.name,
+        url: doc.dataUrl,
+        type: doc.fileType
+      })
+    } else {
+      toast({
+        title: "Error",
+        description: "Document preview is not available",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleDeleteDocument = (documentId: number) => {
+    const doc = documents.find((d) => d.id === documentId)
+    if (doc?.fileUrl) {
+      try {
+        URL.revokeObjectURL(doc.fileUrl)
+      } catch (e) {
+        console.error('Error revoking URL:', e)
+      }
+    }
+
+    const updated = documents.map((d) =>
+      d.id === documentId ? { id: d.id, name: d.name, type: d.type, status: "not_uploaded", required: d.required } : d
+    )
+    setDocuments(updated)
+    localStorage.setItem("documents", JSON.stringify(updated))
+    setUploadedCount(updated.filter(d => d.status !== "not_uploaded").length)
+    
+    toast({
+      title: "Document deleted",
+      description: "The document has been removed"
+    })
+    window.dispatchEvent(new CustomEvent("localStorageUpdated", { detail: { key: "documents" } }))
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "approved":
+        return <Badge className="bg-success/10 text-success border-success/20">Approved</Badge>
+      case "pending":
+        return <Badge variant="secondary">Pending</Badge>
+      case "rejected":
+        return <Badge variant="destructive">Rejected</Badge>
+      default:
+        return <Badge variant="outline">Unknown</Badge>
+    }
+  }
+
+  if (!hasSubmittedApplications) {
+    return (
+      <div>
+        <Navigation />
+        <div className="container py-6">
+          <Card>
+            <CardContent className="text-center py-20">
+              <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <h2 className="text-2xl font-semibold mb-2">No Applications Submitted</h2>
+              <p className="text-muted-foreground mb-6">
+                You need to submit at least one scholarship application before you can manage your documents.
+              </p>
+              <Button asChild>
+                <a href="/dashboard/scholarships">Browse Scholarships</a>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <Navigation />
+      <div className="container py-6 space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Documents</h1>
+          <p className="text-muted-foreground">Upload and manage your required documents</p>
+        </div>
+
+        {/* Required Documents */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Required Documents</CardTitle>
+            <CardDescription>Upload your required documents. All documents must be in PDF, DOC, DOCX, JPG, JPEG, or PNG format.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {documents.filter(doc => doc.required && doc.status === "not_uploaded").map((doc) => (
+                <div key={`required-${doc.id}`} className="border border-border rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <FileText className="h-5 w-5 text-muted-foreground" />
+                      <div>
+                        <h3 className="font-medium">{doc.name}</h3>
+                        <p className="text-sm text-muted-foreground">Required for application</p>
+                      </div>
+                    </div>
+                    <div>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                        onChange={(e) => handleFileUpload(doc.id, e)}
+                        className="hidden"
+                        id={`file-${doc.id}`}
+                      />
+                      <div className="flex items-center space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => document.getElementById(`file-${doc.id}`)?.click()}>
+                          <Upload className="h-4 w-4 mr-2" />
+                          Upload
+                        </Button>
+                        {doc.fileName ? (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => handleViewDocument(doc)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleDeleteDocument(doc.id)} className="text-destructive">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Uploaded Documents */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Uploaded Documents</CardTitle>
+            <CardDescription>View and manage your uploaded documents</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {uploadedCount > 0 ? (
+              <div className="space-y-4">
+                {documents.filter(doc => doc.status !== "not_uploaded").map((doc) => (
+                  <div key={`uploaded-${doc.id}`} className="border border-border rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <FileText className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <h3 className="font-medium">{doc.fileName || doc.name}</h3>
+                          {doc.uploadedDate && (
+                            <p className="text-sm text-muted-foreground">
+                              Uploaded on {doc.uploadedDate} • {getStatusBadge(doc.status)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Button variant="outline" size="sm" onClick={() => handleViewDocument(doc)}>
+                          <Eye className="h-4 w-4 mr-2" />
+                          View
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleDeleteDocument(doc.id)} className="text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <FileText className="h-12 w-12 mx-auto mb-4" />
+                <p className="text-lg font-medium mb-2">No documents uploaded yet</p>
+                <p>Upload your required documents to see them here</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Document Viewer Dialog */}
+      <Dialog open={!!viewDocument} onOpenChange={() => setViewDocument(null)}>
+        <DialogContent className="max-w-4xl h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Document Viewer</DialogTitle>
+            <DialogDescription>{viewDocument?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 bg-muted rounded-lg flex items-center justify-center overflow-hidden">
+            {viewDocument?.url && viewDocument?.type?.startsWith("image") ? (
+              <img src={viewDocument.url} alt={viewDocument.name} className="max-w-full max-h-full object-contain" />
+            ) : viewDocument?.url ? (
+              <div className="text-center p-8">
+                <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-muted-foreground font-medium mb-2">{viewDocument.name}</p>
+                <p className="text-sm text-muted-foreground mb-4">Preview not available for this file type</p>
+                <Button onClick={() => {
+                  const a = document.createElement("a")
+                  a.href = viewDocument.url!
+                  a.download = viewDocument.name
+                  a.click()
+                }}>
+                  Download to View
+                </Button>
+              </div>
+            ) : (
+              <div className="text-center">
+                <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-muted-foreground">No preview available</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export default Documents

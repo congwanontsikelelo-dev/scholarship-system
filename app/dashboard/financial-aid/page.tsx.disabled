@@ -1,0 +1,5 @@
+// Disabled page: financial-aid routing removed. File renamed to prevent Next from routing to it.
+
+export default function DisabledFinancialAidPage() {
+  return null
+}
